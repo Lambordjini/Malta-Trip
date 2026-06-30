@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Malta Trip — Jul 13–22</title>
+
+<!-- PWA / installable app -->
+<link rel="manifest" href="manifest.json"/>
+<meta name="theme-color" content="#0e4a8a"/>
+<meta name="application-name" content="Malta Trip"/>
+<meta name="description" content="Personal Malta trip planner — itinerary, map, budget, packing, weather and tips. Works offline."/>
+<!-- iOS home-screen app -->
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Malta Trip"/>
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png"/>
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png"/>
+
+<!-- vendored locally so the map works offline -->
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css"/>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/sortable/Sortable.min.js"></script>
+<link rel="stylesheet" href="styles.css"/>
+<!-- set theme before paint to avoid a flash -->
+<script>
+  (function(){ var t = localStorage.getItem('malta_theme') || 'light';
+    document.documentElement.setAttribute('data-theme', t); })();
+</script>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <div class="nav-logo"><span>🇲🇹</span> Malta Trip</div>
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
+  </div>
+  <div class="progress-bar"><div class="progress-fill" id="globalProgress" style="width:0%"></div></div>
+</nav>
+
+<!-- ==================== ITINERARY ==================== -->
+<div class="page active" id="page-itinerary">
+  <div class="hero">
+    <div class="hero-title">Malta</div>
+    <div class="hero-sub">13–22 July 2026 · Msida · 2 travellers</div>
+    <div class="countdown" id="countdown"></div>
+    <div class="hero-stats">
+      <div class="hero-stat"><div class="hero-stat-n">10</div><div class="hero-stat-l">Days</div></div>
+      <div class="hero-stat"><div class="hero-stat-n" id="totalStops">0</div><div class="hero-stat-l">Stops</div></div>
+      <div class="hero-stat"><div class="hero-stat-n" id="visitedCount">0</div><div class="hero-stat-l">Visited</div></div>
+      <div class="hero-stat"><div class="hero-stat-n" id="mustCount">0</div><div class="hero-stat-l">Must-sees</div></div>
+    </div>
+    <div class="progress-summary">
+      <div class="progress-summary-label" id="progressLabel">0% complete — let's go!</div>
+      <div class="progress-track"><div class="progress-track-fill" id="heroProgress" style="width:0%"></div></div>
+    </div>
+  </div>
+  <div class="itin-toolbar">
+    <button class="tbtn primary" onclick="shareTrip()">👥 Share trip</button>
+    <button class="tbtn" onclick="exportData()">⬇️ Export backup</button>
+    <button class="tbtn" onclick="triggerImport()">⬆️ Import backup</button>
+    <button class="tbtn danger" onclick="resetItinerary()">↺ Reset itinerary</button>
+    <input type="file" id="importFile" accept="application/json,.json" style="display:none" onchange="importData(this)" />
+  </div>
+  <div class="save-bar" id="syncBar"></div>
+  <div class="save-bar" id="saveBar"></div>
+  <div class="drag-hint">Drag ⠿ to reorder days or move a stop to another day · ✎ edit · ✕ remove · ➕ add stops &amp; days. Everything saves automatically — use Export to back it up.</div>
+  <div class="section-row">
+    <div class="section-label">Your plan</div>
+    <div id="jumpToday"></div>
+  </div>
+  <div id="dayCards"></div>
+</div>
+
+<!-- ==================== MAP ==================== -->
+<div class="page" id="page-map">
+  <div class="section-label" style="margin-bottom:8px">Interactive map — pins numbered in each day's visiting order (filter by day to follow the route)</div>
+  <div class="map-toolbar">
+    <button class="locate-btn" id="locateBtn" onclick="toggleTracking()">📍 Track my location</button>
+    <div class="map-filters" id="mapFilters">
+      <button class="map-filter-btn active" onclick="filterMap('all',this)">All days</button>
+    </div>
+  </div>
+  <div class="loc-readout" id="locReadout"></div>
+  <div class="route-info" id="routeInfo"></div>
+  <div class="map-legend">
+    <div class="map-legend-item"><div class="map-dot" style="background:#2176c7"></div>Attraction</div>
+    <div class="map-legend-item"><div class="map-dot" style="background:#16a34a"></div>Food</div>
+    <div class="map-legend-item"><div class="map-dot" style="background:#7c3aed"></div>Evening</div>
+    <div class="map-legend-item"><div class="map-dot" style="background:#d97706"></div>Your must-see ★</div>
+    <div class="map-legend-item"><div class="map-dot" style="background:#64748b"></div>Visited ✓</div>
+  </div>
+  <div id="map"></div>
+</div>
+
+<!-- ==================== BUDGET ==================== -->
+<div class="page" id="page-budget">
+  <div class="budget-top">
+    <div class="budget-stat"><div class="budget-stat-label">Total budget</div><div class="budget-stat-val" id="budgetTotal">€0</div></div>
+    <div class="budget-stat"><div class="budget-stat-label">Spent</div><div class="budget-stat-val" id="budgetSpent">€0</div></div>
+    <div class="budget-stat"><div class="budget-stat-label">Remaining</div><div class="budget-stat-val" id="budgetLeft">€0</div></div>
+    <div class="budget-stat"><div class="budget-stat-label">Avg / day</div><div class="budget-stat-val" id="budgetDaily">€0</div></div>
+  </div>
+  <div class="budget-set-row">
+    <label>Set total budget:</label>
+    <input type="number" id="budgetInput" placeholder="e.g. 2000" />
+    <button onclick="setBudget()">Set</button>
+    <button class="clear-btn" onclick="clearBudget()">Reset all</button>
+  </div>
+  <div class="budget-track"><div class="budget-track-fill" id="budgetBar" style="width:0%;background:var(--blue-400)"></div></div>
+
+  <div class="section-label">Spending over the trip</div>
+  <div class="spend-chart" id="spendChart"></div>
+
+  <div class="section-row">
+    <div class="section-label">Spending by day</div>
+    <div class="seg" id="budgetModeToggle">
+      <button class="seg-btn" data-mode="even" onclick="setBudgetMode('even')">Even split</button>
+      <button class="seg-btn" data-mode="smart" onclick="setBudgetMode('smart')">Smart by plan</button>
+    </div>
+  </div>
+  <div class="bd-allowance-note" id="budgetByDayNote"></div>
+  <div class="breakdown" id="budgetByDay"></div>
+
+  <div class="section-label">Spending by category</div>
+  <div class="breakdown" id="budgetByCat"></div>
+
+  <div class="section-label">Log an expense</div>
+  <div class="expense-form">
+    <div><label>Day</label><select id="expDay"></select></div>
+    <div><label>Description</label><input type="text" id="expDesc" placeholder="e.g. Cathedral tickets" /></div>
+    <div><label>Category</label>
+      <select id="expCat">
+        <option>🎟️ Attractions</option>
+        <option>🍽️ Food</option>
+        <option>🚕 Transport</option>
+        <option>🛍️ Shopping</option>
+        <option>🏖️ Beach/Activities</option>
+        <option>🏨 Accommodation</option>
+        <option>💊 Other</option>
+      </select>
+    </div>
+    <div><label>Amount (€)</label><input type="number" id="expAmount" placeholder="0" min="0" step="0.01" /></div>
+    <button class="add-btn" onclick="addExpense()">+ Add</button>
+  </div>
+  <div class="section-label">Expenses</div>
+  <div id="expenseList"><div class="empty-state">No expenses logged yet</div></div>
+</div>
+
+<!-- ==================== PACKING ==================== -->
+<div class="page" id="page-packing">
+  <div class="packing-progress" id="packingProgress">0 of 0 items packed</div>
+  <div id="packingSections"></div>
+</div>
+
+<!-- ==================== WEATHER ==================== -->
+<div class="page" id="page-weather">
+  <div class="weather-banner">
+    <div class="weather-banner-title">☀️ Malta in July — what to expect</div>
+    <div class="weather-banner-sub">Hot, dry, and sunny every single day. Average 33–36°C, sea around 26°C. Virtually zero rain. Strong sun from 10AM–4PM.</div>
+  </div>
+  <div id="weatherCurrent" class="weather-current"><div class="weather-current-note">Loading live conditions…</div></div>
+  <div class="section-label">Daily forecast (live when within 16 days, otherwise typical July)</div>
+  <div class="weather-grid" id="weatherGrid"></div>
+  <div class="section-label" style="margin-top:8px">Sun & UV guide</div>
+  <div class="tips-grid">
+    <div class="tip-card"><div class="tip-icon">🕗</div><div class="tip-title">Best outdoor hours</div><div class="tip-body">Plan walks, hikes, and sightseeing for <strong>before 11:00</strong> or <strong>after 17:00</strong>. Between noon and 4PM the heat is brutal — beaches and shade only.</div></div>
+    <div class="tip-card"><div class="tip-icon">🧴</div><div class="tip-title">SPF 50 is not optional</div><div class="tip-body">UV index in Malta in July regularly hits 10–11 (extreme). Reapply every 90 min. Even cloudy days are burning days.</div></div>
+    <div class="tip-card"><div class="tip-icon">💧</div><div class="tip-title">Hydration</div><div class="tip-body">Drink at least 2–3L of water a day. Malta tap water is safe but tastes brackish — buy large bottles at a supermarket (~€0.40 for 2L). Don't rely on cafes.</div></div>
+    <div class="tip-card"><div class="tip-icon">🌬️</div><div class="tip-title">The Xlokk wind</div><div class="tip-body">Occasionally a hot southerly wind (Xlokk) blows from Africa, pushing temps above 38°C. If it hits, go full beach/swimming day — don't fight it.</div></div>
+  </div>
+</div>
+
+<!-- ==================== TIPS ==================== -->
+<div class="page" id="page-tips">
+  <div class="section-label">Essential Malta tips</div>
+  <div class="tips-grid" id="tipsGrid"></div>
+  <div class="credits-note">Day photos from Wikimedia Commons contributors, licensed CC BY-SA.</div>
+</div>
+
+<nav class="bottomnav" id="bottomNav">
+  <button class="bn-tab active" data-page="itinerary" onclick="showPage('itinerary')" aria-label="Itinerary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg><span>Plan</span></button>
+  <button class="bn-tab" data-page="map" onclick="showPage('map')" aria-label="Map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg><span>Map</span></button>
+  <button class="bn-tab" data-page="budget" onclick="showPage('budget')" aria-label="Budget"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h13a2 2 0 0 1 0 4H3"/><circle cx="16.5" cy="12" r="1"/></svg><span>Budget</span></button>
+  <button class="bn-tab" data-page="packing" onclick="showPage('packing')" aria-label="Packing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="7" width="14" height="14" rx="2.5"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7M9 11v6M15 11v6"/></svg><span>Pack</span></button>
+  <button class="bn-tab" data-page="weather" onclick="showPage('weather')" aria-label="Weather"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M19 5l-1.4 1.4M6.4 17.6 5 19"/></svg><span>Weather</span></button>
+  <button class="bn-tab" data-page="tips" onclick="showPage('tips')" aria-label="Tips"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.4c.6.6 1 1.3 1 2.6h6c0-1.3.4-2 1-2.6A6 6 0 0 0 12 3z"/></svg><span>Tips</span></button>
+</nav>
+
+<script src="firebase-config.js"></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+<script type="module" src="sync.js"></script>
+</body>
+</html>
